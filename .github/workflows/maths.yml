@@ -1,0 +1,43 @@
+name: Envoi Lecon Maths
+
+on:
+  schedule:
+    # Déclenchement tous les 2 jours à 7h UTC (9h heure de Paris en été, 8h en hiver)
+    - cron: '0 7 */2 * *'
+  workflow_dispatch: # Permet de lancer le script manuellement pour tester
+
+jobs:
+  run-lesson:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Requis pour mettre à jour state.json
+
+    steps:
+      - name: Récupération du dépôt
+        uses: actions/checkout@v4
+
+      - name: Configuration de Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Installation des dépendances
+        run: pip install -r requirements.txt
+
+      - name: Exécution du script
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+          SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
+          RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+        run: python main.py
+
+      - name: Sauvegarde de la progression
+        run: |
+          git config --global user.name "GitHub Action Robot"
+          git config --global user.email "action@github.com"
+          git add state.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Progression: etape mise a jour" && git push)
+
