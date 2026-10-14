@@ -33,16 +33,19 @@ def generate_lesson(step):
     res_json = response.json()
     return res_json["candidates"][0]["content"]["parts"][0]["text"]
 
+
 def send_email(subject, markdown_content):
     sender = os.environ["SENDER_EMAIL"]
     password = os.environ["SENDER_PASSWORD"]
-    receiver = os.environ["RECEIVER_EMAIL"]
+    raw_receivers = os.environ["RECEIVER_EMAIL"]
     smtp_server = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
     smtp_port = int(os.environ.get("SMTP_PORT", 587))
 
+    # Découpage en liste propre pour l'envoi technique
+    receivers_list = [r.strip() for r in raw_receivers.split(",") if r.strip()]
+
     html_body = markdown.markdown(markdown_content, extensions=["extra", "sane_lists"])
    
-    # Mise en page soignée pour boîte mail
     styled_html = f"""
     <html>
       <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #24292e; max-width: 680px; margin: auto; padding: 25px;">
@@ -62,13 +65,15 @@ def send_email(subject, markdown_content):
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = sender
-    msg["To"] = receiver
+    msg["To"] = ", ".join(receivers_list)
     msg.attach(MIMEText(styled_html, "html", "utf-8"))
 
     with smtplib.SMTP(smtp_server, smtp_port) as server:
         server.starttls()
         server.login(sender, password)
-        server.sendmail(sender, receiver, msg.as_string())
+        # On passe la liste Python directement à sendmail
+        server.sendmail(sender, receivers_list, msg.as_string())
+
 
 def main():
     step = get_current_step()
