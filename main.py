@@ -18,6 +18,7 @@ def update_step(next_step):
 
 def generate_lesson(step):
     api_key = os.environ["GROQ_API_KEY"].strip()
+    model = os.environ.get("GROQ_MODEL", "").strip() or "openai/gpt-oss-20b"
     url = "https://api.groq.com/openai/v1/chat/completions"
 
     headers = {
@@ -28,7 +29,7 @@ def generate_lesson(step):
     user_prompt = f"Génère la leçon correspondant à l'Étape {step} du programme. Reste strictement dans le format 60 minutes défini."
 
     payload = {
-        "model": "llama-3.1-8b-instant",
+        "model": model,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt}
@@ -37,7 +38,8 @@ def generate_lesson(step):
     }
 
     response = requests.post(url, headers=headers, json=payload, timeout=90)
-    response.raise_for_status()
+    if not response.ok:
+        raise RuntimeError(f"Erreur API Groq ({response.status_code}): {response.text}")
     res_json = response.json()
     return res_json["choices"][0]["message"]["content"]
 
