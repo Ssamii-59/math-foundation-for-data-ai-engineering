@@ -17,7 +17,7 @@ def update_step(next_step):
         json.dump({"current_step": next_step}, f, indent=2)
 
 def generate_lesson(step):
-    api_key = os.environ["GROQ_API_KEY"]
+    api_key = os.environ["GROQ_API_KEY"].strip()
     url = "https://api.groq.com/openai/v1/chat/completions"
 
     headers = {
@@ -37,7 +37,11 @@ def generate_lesson(step):
     }
 
     response = requests.post(url, headers=headers, json=payload, timeout=90)
-    response.raise_for_status()
+    
+    if not response.ok:
+        print("Réponse brute de l'API :", response.status_code, response.text)
+        response.raise_for_status()
+        
     res_json = response.json()
     return res_json["choices"][0]["message"]["content"]
 
