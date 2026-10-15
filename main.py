@@ -6,6 +6,8 @@ from email.mime.text import MIMEText
 import markdown
 import requests
 from prompt_template import SYSTEM_PROMPT
+import re
+import urllib.parse
 
 def get_current_step():
     with open("state.json", "r", encoding="utf-8") as f:
@@ -18,7 +20,7 @@ def update_step(next_step):
 
 def generate_lesson(step):
     api_key = os.environ["GROQ_API_KEY"].strip()
-    model = os.environ.get("GROQ_MODEL", "").strip() or "openai/gpt-oss-20b"
+    model = os.environ.get("GROQ_MODEL", "").strip() or "llama-3.1-8b-instant"
     url = "https://api.groq.com/openai/v1/chat/completions"
 
     headers = {
@@ -44,94 +46,29 @@ def generate_lesson(step):
     return res_json["choices"][0]["message"]["content"]
 
 
-import re
+def latex_to_images(text: str) -> str:
+    """
+    Convertit les formules LaTeX ($$..$$ et $..$) en balises <img> pointant vers des SVG CodeCogs.
+    """
+    # 1. Équations centrées : $$ ... $$ ou \[ ... \]
+    def replace_block(match):
+        code = match.group(1).strip()
+        encoded = urllib.parse.quote(code)
+        url = f"https://latex.codecogs.com/svg.image?{encoded}"
+        return f'<div style="text-align: center; margin: 18px 0;"><img src="{url}" alt="{code}" style="vertical-align: middle; max-width: 100%;" /></div>'
 
-def clean_math_formatting(text: str) -> str:
-    # 1. Déballer les commandes de style de police imbriquées
-    for _ in range(4):
-        text = re.sub(r'\\(?:mathbf|boldsymbol|vec|mathit|text|mathrm|bm|mathcal)\{([^{}]+)\}', r'\1', text)
+    text = re.sub(r'\$\$(.+?)\$\$', replace_block, text, flags=re.DOTALL)
+    text = re.sub(r'\\\[(.+?)\\\]', replace_block, text, flags=re.DOTALL)
 
-    # 2. Fractions : \frac{a}{b} -> (a / b)
-    for _ in range(4):
-        text = re.sub(r'\\frac\{([^{}]+)\}\{([^{}]+)\}', r'(\1 / \2)', text)
+    # 2. Formules en ligne : $ ... $ ou \( ... \)
+    def replace_inline(match):
+        code = match.group(1).strip()
+        encoded = urllib.parse.quote(code)
+        url = f"https://latex.codecogs.com/svg.image?{encoded}"
+        return f'<img src="{url}" alt="{code}" style="vertical-align: middle; margin: 0 3px;" />'
 
-    # 3. Racines carrées : \sqrt{...} -> √( ... )
-    for _ in range(4):
-        text = re.sub(r'\\sqrt\{([^{}]+)\}', r'√(\1)', text)
-    text = re.sub(r'\\sqrt([a-zA-Z0-9])', r'√\1', text)
-
-    # 4. Ensembles mathématiques usuels
-    text = re.sub(r'\\mathbb\{R\}', 'ℝ', text)
-    text = re.sub(r'\\mathbb\{N\}', 'ℕ', text)
-    text = re.sub(r'\\mathbb\{Z\}', 'ℤ', text)
-    text = re.sub(r'\\mathbb\{C\}', 'ℂ', text)
-
-    # 5. Délimiteurs et crochets
-    text = re.sub(r'\\langle\s*', '⟨', text)
-    text = re.sub(r'\s*\\rangle', '⟩', text)
-    text = re.sub(r'\\left\(', '(', text)
-    text = re.sub(r'\\right\)', ')', text)
-    text = re.sub(r'\\left\[', '[', text)
-    text = re.sub(r'\\right\]', ']', text)
-    text = re.sub(r'\\left\\\|', '‖', text)
-    text = re.sub(r'\\right\\\|', '‖', text)
-    text = re.sub(r'\\left\|', '|', text)
-    text = re.sub(r'\\right\|', '|', text)
-    text = re.sub(r'\\\|', '‖', text)
-
-    # 6. Lettres grecques
-    greek = {
-        r'\\alpha\b': 'α', r'\\beta\b': 'β', r'\\gamma\b': 'γ', r'\\delta\b': 'δ',
-        r'\\epsilon\b': 'ε', r'\\theta\b': 'θ', r'\\lambda\b': 'λ', r'\\mu\b': 'μ',
-        r'\\sigma\b': 'σ', r'\\pi\b': 'π', r'\\omega\b': 'ω', r'\\phi\b': 'φ',
-        r'\\eta\b': 'η', r'\\rho\b': 'ρ',
-        r'\\Delta\b': 'Δ', r'\\Sigma\b': 'Σ', r'\\Omega\b': 'Ω'
-    }
-    for k, v in greek.items():
-        text = re.sub(k, v, text)
-
-    # 7. Opérateurs et relations
-    ops = {
-        r'\\times\b': '×', r'\\cdot\b': '·', r'\\nabla\b': '∇', r'\\partial\b': '∂',
-        r'\\sum\b': '∑', r'\\prod\b': '∏', r'\\int\b': '∫', r'\\infty\b': '∞',
-        r'\\in\b': '∈', r'\\notin\b': '∉', r'\\subset\b': '⊂', r'\\cup\b': '∪', r'\\cap\b': '∩',
-        r'\\leq\b': '≤', r'\\le\b': '≤', r'\\geq\b': '≥', r'\\ge\b': '≥',
-        r'\\neq\b': '≠', r'\\approx\b': '≈', r'\\to\b': '→', r'\\implies\b': '⇒', r'\\iff\b': '⇔',
-        r'\\pm\b': '±', r'\\forall\b': '∀', r'\\exists\b': '∃'
-    }
-    for k, v in ops.items():
-        text = re.sub(k, v, text)
-
-    # 8. Exposants et transposée
-    text = re.sub(r'\^\{\s*[tT]\s*\}|\^[tT]', 'ᵀ', text)
-    text = re.sub(r'\^\{\s*2\s*\}|\^2', '²', text)
-    text = re.sub(r'\^\{\s*3\s*\}|\^3', '³', text)
-    text = re.sub(r'\^\{\s*n\s*\}|\^n', 'ⁿ', text)
-    text = re.sub(r'\^\{\s*k\s*\}|\^k', 'ᵏ', text)
-    text = re.sub(r'\^\{\s*(-?[0-9a-zA-Z]+)\s*\}', r'^\1', text)
-
-    # 9. Indices
-    sub_map = {'0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉', 'i': 'ᵢ', 'j': 'ⱼ', 'k': 'ₖ', 'n': 'ₙ', 'm': 'ₘ', 'p': 'ₚ'}
-    for num, sub in sub_map.items():
-        text = re.sub(r'_\{' + num + r'\}|_' + num, sub, text)
-
-    # 10. Nettoyage des délimiteurs LaTeX math ($$, $, \(, \))
-    text = re.sub(r'\$\$', '', text)
-    text = re.sub(r'\\\(|\\\)', '', text)
-    text = re.sub(r'\$([^\$]+)\$', r'\1', text)
-
-    # 11. Conversion des normes à doubles barres et simples barres d'égalité
-    text = re.sub(r'\|{2}', '‖', text)
-    text = re.sub(r'(^|[( \t])\|([a-zA-Z0-9_]+)\|\s*=\s*', r'\1‖\2‖ = ', text)
-
-    # 12. Retrait des parenthèses superflues entourant une formule (ex: (‖x‖ = ...))
-    text = re.sub(r'\(\s*(‖[^‖\n]+‖\s*=[^)\n]+)\)', r'\1', text)
-    text = re.sub(r'‖\s*=\s*', r'‖ = ', text)
-
-    # Espaces superflus et ponctuation
-    text = re.sub(r' {2,}', ' ', text)
-    text = re.sub(r'⟨ ', '⟨', text)
-    text = re.sub(r' ⟩', '⟩', text)
+    text = re.sub(r'(?<!\$)\$(?!\$)(.+?)(?<!\$)\$(?!\$)', replace_inline, text)
+    text = re.sub(r'\\\((.+?)\\\)', replace_inline, text)
 
     return text
 
@@ -163,7 +100,7 @@ def style_html_content(html: str) -> str:
         )
         html = html.replace(f"<!--PRE_BLOCK_{i}-->", styled_pre)
 
-    # 4. Titres h2 et h3
+    # 4. Titres h2, h3 et h4
     html = re.sub(
         r'<h2>(.*?)</h2>',
         r'<h2 style="font-size: 21px; font-weight: 700; color: #1e3a8a; border-left: 4px solid #3b82f6; background-color: #eff6ff; padding: 10px 16px; border-radius: 0 8px 8px 0; margin: 32px 0 14px 0;">\1</h2>',
@@ -243,11 +180,11 @@ def send_email(subject, markdown_content):
 
     receivers_list = [r.strip() for r in raw_receivers.split(",") if r.strip()]
 
-    # Nettoyage des notations mathématiques brutes
-    cleaned_markdown = clean_math_formatting(markdown_content)
+    # Remplacement du LaTeX brut par des images SVG
+    math_rendered_content = latex_to_images(markdown_content)
 
     # Conversion Markdown vers HTML puis injection des styles inline
-    raw_html = markdown.markdown(cleaned_markdown, extensions=["extra", "sane_lists"])
+    raw_html = markdown.markdown(math_rendered_content, extensions=["extra", "sane_lists"])
     styled_content = style_html_content(raw_html)
 
     styled_html = f"""<!DOCTYPE html>
@@ -329,8 +266,7 @@ def send_email(subject, markdown_content):
     msg["From"] = sender
     msg["To"] = ", ".join(receivers_list)
 
-    # Version texte brut de secours et version HTML soignée
-    msg.attach(MIMEText(cleaned_markdown, "plain", "utf-8"))
+    msg.attach(MIMEText(markdown_content, "plain", "utf-8"))
     msg.attach(MIMEText(styled_html, "html", "utf-8"))
 
     with smtplib.SMTP(smtp_server, smtp_port) as server:
