@@ -20,7 +20,7 @@ def update_step(next_step):
 
 def generate_lesson(step):
     api_key = os.environ["GROQ_API_KEY"].strip()
-    model = os.environ.get("GROQ_MODEL", "").strip() or "llama-3.1-8b-instant"
+    model = os.environ.get("GROQ_MODEL", "").strip() or "openai/gpt-oss-20b"
     url = "https://api.groq.com/openai/v1/chat/completions"
 
     headers = {
