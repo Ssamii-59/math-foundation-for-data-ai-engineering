@@ -17,20 +17,29 @@ def update_step(next_step):
         json.dump({"current_step": next_step}, f, indent=2)
 
 def generate_lesson(step):
-    api_key = os.environ["GEMINI_API_KEY"]
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
-    user_prompt = f"Génère la leçon correspondant à l'Étape {step} du programme. Reste strictement dans le format 60 minutes défini."
-   
-    payload = {
-        "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-        "contents": [{"parts": [{"text": user_prompt}]}],
-        "generationConfig": {"temperature": 0.4}
+    api_key = os.environ["GROQ_API_KEY"]
+    url = "https://api.groq.com/openai/v1/chat/completions"
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
     }
-   
-    response = requests.post(url, json=payload, timeout=90)
+
+    user_prompt = f"Génère la leçon correspondant à l'Étape {step} du programme. Reste strictement dans le format 60 minutes défini."
+
+    payload = {
+        "model": "llama-3.3-70b-versatile",
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt}
+        ],
+        "temperature": 0.4
+    }
+
+    response = requests.post(url, headers=headers, json=payload, timeout=90)
     response.raise_for_status()
     res_json = response.json()
-    return res_json["candidates"][0]["content"]["parts"][0]["text"]
+    return res_json["choices"][0]["message"]["content"]
 
 
 def send_email(subject, markdown_content):
