@@ -1,7 +1,6 @@
 import json
 import os
 import smtplib
-import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import markdown
@@ -9,24 +8,14 @@ import requests
 from prompt_template import SYSTEM_PROMPT
 import re
 
-# Chargement optionnel d'un .env pour faciliter les tests en local
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
-
-
 def get_current_step():
     with open("state.json", "r", encoding="utf-8") as f:
         data = json.load(f)
     return data.get("current_step", 1)
 
-
 def update_step(next_step):
     with open("state.json", "w", encoding="utf-8") as f:
         json.dump({"current_step": next_step}, f, indent=2)
-
 
 def generate_lesson(step):
     api_key = os.environ["GROQ_API_KEY"].strip()
@@ -46,67 +35,32 @@ def generate_lesson(step):
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt}
         ],
-        "temperature": 0.4,
-        "max_tokens": 4096
+        "temperature": 0.4
     }
 
-    # Boucle de retry (3 tentatives) pour éviter les plantages sur micro-coupure
-    max_retries = 3
-    for attempt in range(1, max_retries + 1):
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=90)
-            if response.ok:
-                res_json = response.json()
-                return res_json["choices"][0]["message"]["content"]
-            print(f"Tentative {attempt}/{max_retries} échouée ({response.status_code}): {response.text}")
-        except requests.RequestException as e:
-            print(f"Tentative {attempt}/{max_retries} erreur réseau : {e}")
-
-        if attempt < max_retries:
-            time.sleep(3 * attempt)
-
-    raise RuntimeError(f"Échec de l'appel Groq après {max_retries} tentatives.")
-
-
-def wrap_solution_in_accordion(markdown_text: str) -> str:
-    """
-    Isole la partie corrigés après '---' pour la ranger dans un accordéon interactif <details>.
-    """
-    parts = re.split(r'\n\s*---\s*\n', markdown_text, maxsplit=1)
-    if len(parts) == 2:
-        cours, solution = parts
-        accordion_block = f"""
-<details style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px 18px; margin: 28px 0;">
-  <summary style="font-weight: 700; color: #b45309; cursor: pointer; font-size: 16px; outline: none;">
-    👉 Cliquer ici pour afficher les corrigés détaillés & ressources
-  </summary>
-  <div style="margin-top: 18px; border-top: 1px solid #e2e8f0; padding-top: 14px;">
-
-{solution}
-
-  </div>
-</details>
-"""
-        return f"{cours}\n\n{accordion_block}"
-    return markdown_text
+    response = requests.post(url, headers=headers, json=payload, timeout=90)
+    if not response.ok:
+        raise RuntimeError(f"Erreur API Groq ({response.status_code}): {response.text}")
+    res_json = response.json()
+    return res_json["choices"][0]["message"]["content"]
 
 
 def style_html_content(html: str) -> str:
-    # 1. Titres H2 sobres avec barre latérale ambrée chaleureuse
+    # 1. Titres H2 avec fond visible et texte sombre forcé
     html = re.sub(
         r'<h2>(.*?)</h2>',
-        r'<h2 style="font-size: 18px; font-weight: 700; color: #1c1917 !important; border-left: 3px solid #d97706; background-color: #fef3c7; padding: 10px 14px; border-radius: 4px; margin: 26px 0 14px 0;">\1</h2>',
+        r'<h2 style="font-size: 18px; font-weight: 700; color: #1c1917 !important; border-left: 3px solid #d97706; background-color: #fef3c7; padding: 10px 14px; border-radius: 4px; margin: 28px 0 14px 0;">\1</h2>',
         html
     )
 
-    # 2. Titres H3 discrets
+    # 2. Titres H3
     html = re.sub(
         r'<h3>(.*?)</h3>',
         r'<h3 style="font-size: 16px; font-weight: 700; color: #0f766e !important; margin: 20px 0 10px 0;">\1</h3>',
         html
     )
 
-    # 3. Paragraphes aérés avec couleur de texte robuste
+    # 3. Paragraphes : couleur foncée forcée avec !important
     html = re.sub(
         r'<p>(.*?)</p>',
         r'<p style="font-size: 15px; line-height: 1.7; color: #292524 !important; margin: 0 0 14px 0;">\1</p>',
@@ -114,7 +68,7 @@ def style_html_content(html: str) -> str:
         flags=re.DOTALL
     )
 
-    # 4. Encarts de formules / citations (style Notion)
+    # 4. Encarts de formules / citations
     html = re.sub(
         r'<blockquote>\s*<p>(.*?)</p>\s*</blockquote>',
         r'<blockquote style="background-color: #f5f5f4; border-left: 3px solid #78716c; padding: 12px 16px; margin: 18px 0; border-radius: 4px; color: #1c1917 !important; font-size: 15px; border: 1px solid #e7e5e4; border-left-width: 3px;"><p style="margin: 0; line-height: 1.6; color: #1c1917 !important;">\1</p></blockquote>',
@@ -122,7 +76,7 @@ def style_html_content(html: str) -> str:
         flags=re.DOTALL
     )
 
-    # 5. Liens cliquables bien contrastés pour les fiches d'exercices
+    # 5. Liens ressources bien contrastés
     html = re.sub(
         r'<a (href="[^"]*")>(.*?)</a>',
         r'<a \1 style="color: #2563eb !important; text-decoration: underline; font-weight: 600;">\2 ↗</a>',
@@ -176,14 +130,10 @@ def send_email(subject, markdown_content):
 
     receivers_list = [r.strip() for r in raw_receivers.split(",") if r.strip()]
 
-    # Rangement des corrigés dans un accordéon
-    content_with_accordion = wrap_solution_in_accordion(markdown_content)
-
-    # Transformation Markdown vers HTML puis injection des styles
-    raw_html = markdown.markdown(content_with_accordion, extensions=["extra", "sane_lists"])
+    raw_html = markdown.markdown(markdown_content, extensions=["extra", "sane_lists"])
     styled_content = style_html_content(raw_html)
 
-    # Forcer la palette claire et bloquer le dark-mode agressif des clients mails
+    # Bloquer l'inversion du mode sombre avec color-scheme et forcer le fond blanc
     styled_html = f"""<!DOCTYPE html>
 <html lang="fr" style="color-scheme: light only;">
   <head>
@@ -271,7 +221,6 @@ def main():
    
     update_step(step + 1)
     print(f"Succès. Prochaine étape : {step + 1}")
-
 
 if __name__ == "__main__":
     main()
